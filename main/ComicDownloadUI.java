@@ -12,6 +12,7 @@ import java.io.*;
 import javax.swing.*;
 import java.util.regex.*;
 import java.util.*;
+import scanandparse.ScanVol;
 
 
 public class ComicDownloadUI extends javax.swing.JDialog {
@@ -21,8 +22,10 @@ public class ComicDownloadUI extends javax.swing.JDialog {
      */
     
     List<String> picList;                                                               //全局变量：图片网址列表，每使用一次Scan函数就更新一次
+    List<String> volList;
     String selectPath;
     String comicName;
+    boolean isVol;
     
     public ComicDownloadUI(java.awt.Frame parent, boolean modal) {
         super(parent, modal);
@@ -60,7 +63,7 @@ public class ComicDownloadUI extends javax.swing.JDialog {
         setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
         setTitle("汗汗漫画图片下载器Beta by huxizhijian");
 
-        btnGet.setText("获取图片网址");
+        btnGet.setText("解析网址");
         btnGet.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 btnGetActionPerformed(evt);
@@ -73,7 +76,7 @@ public class ComicDownloadUI extends javax.swing.JDialog {
 
         jScrollPane1.setViewportView(lisPicListUrl);
 
-        btnStart.setText("下载本集/卷");
+        btnStart.setText("请先解析网址");
         btnStart.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 btnStartActionPerformed(evt);
@@ -85,7 +88,7 @@ public class ComicDownloadUI extends javax.swing.JDialog {
         areaContent.setRows(5);
         jScrollPane2.setViewportView(areaContent);
 
-        jLabel2.setText("目前网站仅支持http://www.hhxiee.cc和http://www.hhmanhua.net，地址仅支持点进集里有图片的地址，选择自动漫画名为统一的英文");
+        jLabel2.setText("目前网站仅支持http://www.hhxiee.cc和http://www.hhmanhua.net，地址支持目录页和单卷地址，选择自动漫画名为代码");
 
         fieSavePath.setToolTipText("");
 
@@ -99,10 +102,10 @@ public class ComicDownloadUI extends javax.swing.JDialog {
         labSavePath.setText("保存目录：");
 
         buttonGroup1.add(rbuChooseName);
+        rbuChooseName.setSelected(true);
         rbuChooseName.setText("保存漫画名");
 
         buttonGroup1.add(rbuChooseAuto);
-        rbuChooseAuto.setSelected(true);
         rbuChooseAuto.setText("自动");
 
         javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
@@ -174,8 +177,10 @@ public class ComicDownloadUI extends javax.swing.JDialog {
 
     private void btnGetActionPerformed(java.awt.event.ActionEvent evt) {                                       
         // 按钮：获取图片网址
+        String url = fieGetURL.getText();
+        if (url.matches("(.*)s=(.*)")){
+            isVol = false;
          new Thread(()->{
-            String url = fieGetURL.getText();
             String contents = Webdownload.startDownload(url,"GB2312");
             picList = ScanHHPic.scanPicInPage(url,contents);                
             DefaultListModel defaultListModel = new DefaultListModel();
@@ -187,19 +192,43 @@ public class ComicDownloadUI extends javax.swing.JDialog {
                 lisPicListUrl.setModel(defaultListModel);
                 areaContent.setText("漫画名："+picName.get(0)+"\n");
                 if (picName.size() > 2)
-                    areaContent.append("目前：第"+picName.get(1)+"  "+"来自："+picName.get(2).substring(0,4)+"\n");
+                    areaContent.append("目前："+picName.get(1)+"  "+"来自："+picName.get(2).substring(0,4)+"\n");
                 else if (picName.size() == 2)
                     areaContent.append("来自："+picName.get(1).substring(0,4)+"\n");
                 areaContent.append("软件嗅探到该集/卷共有"+picList.size()+"页"+ "\n");
                 fieSaveFileName.setText(picName.get(0));
                 comicName = picName.get(0);
-            }); 
-        }).start(); 
+                btnStart.setText("下载本集/卷");
+                }); 
+            }).start(); 
+        }   else {
+            isVol = true;
+          new Thread(()->{
+            String contents = Webdownload.startDownload(url,"GB2312");
+            volList = ScanVol.scanVolInPage(url,contents); 
+            String[] volname1 = volList.get(0).split(":");
+            String[] comicName = volname1[0].split(" ");
+            DefaultListModel defaultListModel = new DefaultListModel();
+                for (int i=0;i<volList.size();i++){
+                    defaultListModel.add(i, volList.get(i)); 
+                }
+            SwingUtilities.invokeLater(()->{                                              //更新容器内容
+                lisPicListUrl.setModel(defaultListModel);
+                areaContent.setText("漫画名：");
+                areaContent.append(comicName[0]+"\n");
+                areaContent.append("软件嗅探到该漫画共有"+volList.size()+"集/卷"+ "\n");
+                btnStart.setText("下载全集");
+                fieSaveFileName.setText(comicName[0]);
+                }); 
+            }).start();                 
+        }
+
     }                                      
 
     private void btnStartActionPerformed(java.awt.event.ActionEvent evt) {                                         
         // TODO add your handling code here:
         selectPath = fieSavePath.getText();
+        if (isVol == false){
         new Thread(()->{
             download();
             SwingUtilities.invokeLater(()->{ 
@@ -207,6 +236,13 @@ public class ComicDownloadUI extends javax.swing.JDialog {
                 areaContent.append("保存于："+selectPath+"\n");
             });
         }).start();
+        } else if (isVol == true){
+            new Thread(()->{
+            downloadAllVol();
+            }).start();
+        } else {
+            JOptionPane.showMessageDialog(null,"请先进行解析!", "错误！", JOptionPane.WARNING_MESSAGE);
+        }
     }                                        
 private void download(){
             String filePath = selectPath;                                        //获取目录
@@ -242,6 +278,36 @@ private void download(){
                 });
                 }
             }
+}
+
+private void downloadAllVol(){
+    for (int i = 0; i < volList.size();i++){
+        String[] volurl = volList.get(i).split(":");
+        String url = "http:"+ volurl[2];
+        if (url.matches("(.*)s=(.*)")){
+
+            String contents = Webdownload.startDownload(url,"GB2312");
+            picList = ScanHHPic.scanPicInPage(url,contents);                
+
+            List<String> picName=ParseName.ParseHHFileName(contents);  
+
+            SwingUtilities.invokeLater(()->{                                              //更新容器内容
+
+                areaContent.append("漫画名："+picName.get(0)+"\n");
+                if (picName.size() > 2)
+                    areaContent.append("目前："+picName.get(1)+"  "+"来自："+picName.get(2).substring(0,4)+"\n");
+                else if (picName.size() == 2)
+                    areaContent.append("来自："+picName.get(1).substring(0,4)+"\n");
+                areaContent.append("软件嗅探到该集/卷共有"+picList.size()+"页"+ "\n");
+                }); 
+            download();
+            SwingUtilities.invokeLater(()->{ 
+                areaContent.append("该集/卷下载结束！"+"\n");
+                areaContent.append("保存于："+selectPath+"\n");
+            });
+
+        }
+    }
 }
     
     
